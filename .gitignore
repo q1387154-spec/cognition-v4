@@ -1,0 +1,45 @@
+# 认知系统 V4 — 数据文件
+cognition_v4.db
+*.db
+*.sqlite3
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 测试缓存
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+*.coverage
+nosetests.xml
+
+# 本地编辑器配置
+.obsidian/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 环境变量 / 密钥
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+service_account.json
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志
+*.log
+
+# 临时文件
+tmp/
+temp/
