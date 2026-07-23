@@ -58,7 +58,11 @@ class Prediction:
     def expected_return_pct(self) -> Optional[float]:
         if self.expected_value is None:
             return None
-        return round((self.expected_value - 1) * 100, 2)
+        # metadata 中存 base_value（当前价），用于计算相对涨跌幅
+        base_value = self.metadata.get("base_value", 1.0)
+        if base_value == 0:
+            return None
+        return round((self.expected_value - base_value) / base_value * 100, 2)
 
     @classmethod
     def generate_id(cls, *parts: str) -> str:

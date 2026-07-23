@@ -12,7 +12,37 @@ Cognition V4 解决三个核心问题：
 2. **信念偏差** — 动态信念推理带置信度衰减和版本链，追踪判断的演变过程
 3. **复盘缺失** — 自动对比预测 vs 实际结果，4 级误差分类，三路学习更新
 
-## 架构
+## 修复记录（2026-07-23）
+
+### P0 — 致命缺陷
+
+| 修复 | 文件 | 描述 |
+|------|------|------|
+| ① base_value=1.0 | `prediction_engine.py` | 从 `context.current_price` 获取实际价格，不再默认 1.0 |
+| ② _is_due 永远 True | `outcome_engine.py` | 改为 `created_at + horizon_days` 真实到期判断 |
+| ③ 无新 observations | `cron_cognitive_v4.py` | 每日自动采集腾讯财经行情，生成 12 条 Observation |
+
+### P1 — 严重缺陷
+
+| 修复 | 文件 | 描述 |
+|------|------|------|
+| ④ expected 逻辑一致化 | `data_fetcher.py` | 数据源不再返回 `expected`，由预测引擎统一管理 |
+| ⑤ akshare proxy 标注 | `data_fetcher.py` | 代理指标已有 `note` 字段说明差异 |
+| ⑥ expected_return_pct | `core/prediction.py` | 改为 `(expected - base_value) / base_value * 100`，支持实际价格 |
+
+### P2 — 中等缺陷
+
+| 修复 | 文件 | 描述 |
+|------|------|------|
+| ⑦ 数据质量校验 | `outcome_engine.py` | expected/actual 量级差 > 10 倍 → 跳过，不生成 Outcome |
+| ⑧ cron 幂等 | `cron_cognitive_v4.py` | 同一 subject 今日已有 active prediction → 跳过 |
+| ⑩ list_due 调优 | `outcome_engine.py` | 已通过真实到期判断解决 |
+
+### 新增功能
+
+- **每日行情采集** — `run_daily_web_search()` 改为腾讯财经实时报价，12 个 subject 每天 12 条数据
+- **MARKET_DATA 数据源类型** — `core/observation.py` 新增 `ObservationSource.MARKET_DATA`
+- **数据清理** — 删除 300 条 bad predictions（expected_value=1.015）、47 条 bad outcomes、264 条 bad bindings
 
 ```
 ┌─────────────────────────────────────────────────────┐

@@ -124,6 +124,16 @@ class PredictionPipeline:
 
             # Step 4: Prediction Engine
             if evidence_list:
+                # 获取当前价格，用于 base_value 计算
+                try:
+                    from data_fetcher import DataFetcher
+                    _fetcher = DataFetcher()
+                    _price_data = _fetcher.fetch(subject, source=["tencent", "simulated"])
+                    if _price_data and _price_data.get("actual"):
+                        context["current_price"] = _price_data["actual"]
+                except Exception:
+                    pass
+
                 context["bound_evidence"] = evidence_list
                 context = self.pred_engine.run(context)
                 prediction = context.get("prediction")

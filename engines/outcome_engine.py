@@ -59,12 +59,12 @@ class OutcomeEngine(BaseEngine):
         return context
 
     def _is_due(self, prediction) -> bool:
-        """检查 prediction 是否到期。"""
+        """检查 prediction 是否到期（基于 created_at + horizon_days）。"""
         if prediction.status != PredictionStatus.ACTIVE:
             return False
-        # 简化：基于 created_at + horizon_days 判断
-        # 实际生产应与现实时间对比
-        return True  # 由调用方传入已筛选的 due list
+        from datetime import timedelta
+        due_date = prediction.created_at + timedelta(days=prediction.horizon_days)
+        return datetime.now() >= due_date
 
     def _generate_outcome_for(self, prediction, dry_run: bool) -> Optional[Outcome]:
         """为单个 prediction 生成 outcome。"""
@@ -84,6 +84,19 @@ class OutcomeEngine(BaseEngine):
 
         # 2. 计算误差
         expected = prediction.expected_value or 0.5
+
+        # 2a. 数据质量检查：如果 expected 和 actual 量级差异超过 10 倍 → 跳过
+        # 修复 P2 ⑦：避免 expected=1.015 和 actual=213.77 被误判为 missing_signal
+        if abs(expected) > 0.01 and abs(actual_value) > 0.01:
+            scale_ratio = max(abs(expected), abs(actual_value)) / min(abs(expected), abs(actual_value))
+            if scale_ratio > 10:
+                self.warning(
+                    f"⚠ 数据质量跳过: {target} expected={expected:.4f} "
+                    f"actual={actual_value:.4f} 量级差{scale_ratio:.0f}倍 → 不生成 Outcome"
+                )
+                return None
+
+        # 2b. 计算误差
         error = abs(actual_value - expected)
         relative_error = error / abs(expected) if expected else error
 

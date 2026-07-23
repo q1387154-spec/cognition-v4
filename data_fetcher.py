@@ -215,15 +215,12 @@ class DataFetcher:
             # 对于"营收增长""不良率"等也用类似逻辑
             # 对于个股价格指标，actual=current_price
             
-            # 简单策略：用昨收价 * 1.02 作为 expected（+2% 预期）
-            # 实际值用当前价
-            expected = prev * 1.02
+            # 对于股价，只返回实际值，expected 由预测引擎统一管理
             actual = price
 
             result_desc = f"{name}({tc_symbol}) 现价={price} 昨收={prev} 涨跌={change_pct}% 最高={high} 最低={low}"
 
             return {
-                "expected": round(expected, 4),
                 "actual": round(actual, 4),
                 "result": result_desc,
                 "error_type": self._classify_price_error(change_pct),
@@ -283,7 +280,6 @@ class DataFetcher:
                 return None
             
             return {
-                "expected": round(prev_close * 1.02, 4),
                 "actual": round(close, 4),
                 "result": f"{sym_info['name']} 网易财经 最新价={close} 昨收={prev_close} 最高={high} 最低={low}",
                 "error_type": "no_error",

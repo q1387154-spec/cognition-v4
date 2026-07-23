@@ -25,6 +25,8 @@ class PredictionEngine(BaseEngine):
         bound_evidence = context.get("bound_evidence", [])
         horizon_days = context.get("horizon_days", 90)
         target = context.get("target", belief.subject if belief else "unknown")
+        # 从 context 取当前价格，用于 base_value 计算
+        self._current_price = context.get("current_price", None)
 
         if not belief:
             self.warning("无 Belief 输入，跳过")
@@ -62,6 +64,7 @@ class PredictionEngine(BaseEngine):
             effective_score=effective_score,
             bound_evidence_ids=[e.id for e in bound_evidence],
             status=PredictionStatus.ACTIVE,
+            metadata={"base_value": self._current_price or 1.0},
         )
 
         context["prediction"] = prediction
@@ -71,7 +74,8 @@ class PredictionEngine(BaseEngine):
     def _generate_scenarios(self, belief, evidence) -> List[Scenario]:
         """生成基准/乐观/悲观三场景。"""
         base_prob = belief.probability
-        base_value = belief.metadata.get("base_value", 1.0)
+        # 优先级: context 传来的 current_price → belief.metadata.base_value → 1.0
+        base_value = self._current_price or belief.metadata.get("base_value", 1.0)
 
         # 基准场景
         base = Scenario(

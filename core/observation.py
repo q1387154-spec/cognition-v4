@@ -10,6 +10,7 @@ class ObservationSource(str, Enum):
     ANNOUNCEMENT = "announcement"
     FINANCIAL_REPORT = "financial_report"
     RESEARCH_REPORT = "research_report"
+    MARKET_DATA = "market_data"
     POLICY = "policy"
     SOCIAL_MEDIA = "social_media"
     WEBSITE = "website"

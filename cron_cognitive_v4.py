@@ -9,9 +9,9 @@ Hermes Cognitive OS V4 — Cron Pipeline
 """
 import sys
 from pathlib import Path
-from typing import List, Dict, Any
-
-# Path setup — 用绝对路径，不依赖 cwd
+from typing import List, Dict, Any, Optional
+import logging
+from datetime import datetime
 # 真实脚本位置: ~/hermes/cognition-v4/cron_cognitive_v4.py
 # 但 cron 跑时可能从 ~/AppData/Local/hermes/scripts/cron_cognitive_v4.py 复制副本启动
 # 两种情况下 V4_DIR 都应该是 ~/hermes/cognition-v4/
@@ -30,7 +30,7 @@ except Exception:
 
 from workflow import PredictionPipeline, EnhancedLearningPipeline
 from memory import PredictionStore, OutcomeStore, BeliefStore
-from core import Outcome, ErrorType
+from core import Outcome, ErrorType, Observation, ObservationSource
 from data_fetcher import DataFetcher
 import logging
 from datetime import datetime
@@ -70,7 +70,60 @@ DATA_FETCHER = DataFetcher()
 DATA_SOURCE_ORDER = ["akshare", "yfinance", "simulated"]
 
 
-def run_prediction_pipeline(subject: str, horizon_days: int) -> Dict[str, Any]:
+def run_daily_web_search() -> List[Dict[str, Any]]:
+    """每日网络搜索，为每个 subject 生成新 Observation。
+
+    解决 P0 ③：观察引擎每天自动拉新数据，避免管道空转。
+    数据源：腾讯财经实时报价（无需 API key，国内稳定可用）。
+    """
+    import hashlib
+    import json
+
+    # 用腾讯财经实时报价作为每日数据源
+    results = []
+    from data_fetcher import DataFetcher
+    fetcher = DataFetcher()
+
+    for item in SUBJECTS:
+        subject = item["subject"]
+        try:
+            data = fetcher.fetch(subject, source=["tencent", "simulated"])
+            if not data or not data.get("actual"):
+                continue
+
+            actual = data["actual"]
+            price = data.get("price", actual)
+            prev_close = data.get("prev_close", actual)
+            change_pct = data.get("change_pct", "0")
+            source_used = data.get("_source_used", "simulated")
+            result_desc = data.get("result", f"{subject} 最新值={actual}")
+
+            obs = {
+                "source": "market_data",
+                "raw_content": result_desc,
+                "title": f"{subject} 每日行情 {datetime.now().strftime('%Y-%m-%d')}: {actual}",
+                "url": f"tencent://{data.get('source', '')}",
+                "timestamp": datetime.now(),
+                "tags": [subject, "daily_market"],
+                "metadata": {
+                    "subject": subject,
+                    "actual": actual,
+                    "price": price,
+                    "prev_close": prev_close,
+                    "change_pct": change_pct,
+                    "source_used": source_used,
+                },
+            }
+            results.append(obs)
+            logger.info(f"  📊 {subject}: {actual} (source={source_used})")
+        except Exception as e:
+            logger.debug(f"  获取 {subject} 数据失败: {e}")
+
+    logger.info(f"  每日行情采集完成: {len(results)} 条新数据")
+    return results
+
+
+def run_prediction_pipeline(subject: str, horizon_days: int, extra_sources: Optional[List[Dict]] = None) -> Dict[str, Any]:
     """运行单个 subject 的预测管道。
 
     集成：
@@ -85,11 +138,30 @@ def run_prediction_pipeline(subject: str, horizon_days: int) -> Dict[str, Any]:
     )
     from datetime import datetime as _dt
 
+    # 幂等性检查：如果今天已有该 subject 的 active prediction → 跳过
+    pred_store = PredictionStore.get(DB_PATH)
+    today = _dt.now().strftime("%Y-%m-%d")
+    all_active = pred_store.list_active()
+    existing = [p for p in all_active if p.target == subject]
+    for ep in existing:
+        if ep.created_at.strftime("%Y-%m-%d") == today:
+            logger.info(f"  ⏭ {subject}: 今天已有 active prediction，跳过")
+            return {
+                "subject": subject,
+                "observations": 0,
+                "evidence": 0,
+                "prediction_id": ep.id[:8],
+                "effective_score": ep.effective_score,
+                "status": "skipped_duplicate_today",
+                "predictability": 0,
+            }
+
     pipeline = PredictionPipeline(DB_PATH)
     result = pipeline.run(
         wiki_dir=str(WIKI_DIR),
         subject=subject,
         horizon_days=horizon_days,
+        sources=extra_sources or [],
     )
 
     obs_count = len(result.get("observations", []))
@@ -412,10 +484,22 @@ def main():
     logger.info("Hermes V4 Cron 开始")
     logger.info("=" * 50)
 
-    # Step 1: 多 subject 预测
+    # Step 0: 每日网络搜索 → 新 Observation
+    search_results = run_daily_web_search()
+    # 按 subject 分组
+    search_by_subject: Dict[str, List[Dict]] = {}
+    for obs in search_results:
+        subj = obs.get("metadata", {}).get("subject", "all")
+        if subj not in search_by_subject:
+            search_by_subject[subj] = []
+        search_by_subject[subj].append(obs)
+
+    # Step 1: 多 subject 预测（带每日搜索源）
     pipeline_results = []
     for item in SUBJECTS:
-        result = run_prediction_pipeline(item["subject"], item["horizon_days"])
+        subj = item["subject"]
+        extra = search_by_subject.get(subj, [])
+        result = run_prediction_pipeline(subj, item["horizon_days"], extra_sources=extra)
         pipeline_results.append(result)
 
     # Step 2: 自动学习（到期验证 + 注入）
@@ -430,6 +514,7 @@ def main():
     n_pred = sum(1 for r in pipeline_results if r['prediction_id'])
     n_skip = sum(1 for r in pipeline_results if r.get('status') == 'skipped_low_predictability')
     n_outcome = sum(1 for r in learning_results if r.get('status') == 'learned')
+    n_search = len(search_results)
     n_learn = sum(1 for r in learning_results if r.get('learning'))
     n_bind = sum(r.get('bindings', 0) for r in pipeline_results)
     n_scenario = sum(r.get('scenarios', 0) for r in pipeline_results if r.get('scenarios', 0) > 0)
@@ -440,6 +525,7 @@ def main():
     )
     logger.info(f"  Predictions: {n_pred} 个新（{n_skip} 个因可预测性低跳过）")
     logger.info(f"  Outcomes: {n_outcome} 个新")
+    logger.info(f"  Search: {n_search} 条新发现（来自每日网络搜索）")
     logger.info(f"  Learnings: {n_learn} 个新")
     logger.info(f"  Scenarios: {n_scenario} 场景重生成")
     logger.info(f"  Bindings: {n_bind} 条 evidence→prediction 绑定")
